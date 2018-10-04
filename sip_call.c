@@ -2,7 +2,7 @@
 
 #define THIS_APP "SIP_CALL"
 
-#define SIP_DOMAIN "192.168.0.106"
+#define SIP_DOMAIN "127.0.1.1"
 #define SIP_USER "222"
 
 

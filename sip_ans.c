@@ -10,11 +10,18 @@
 #define MAX_COUNT 1
 #define DELAY 2
 
+#define WAV_FILE "./trentemoller-miss_you.wav"
 
 pj_pool_t *pool;
 pjmedia_port *m_port;
 pjsua_conf_port_id ring_slot;
 pjmedia_tone_desc tones;
+
+pjsua_player_id player_id;
+pjsua_conf_port_id wav_port;
+pj_str_t wav_file;
+
+
 
 
 static void timer_callback(pj_timer_heap_t *ht, pj_timer_entry *e)
@@ -111,8 +118,10 @@ static void on_call_media_state(pjsua_call_id call_id)
 
     pjsua_call_get_info(call_id, &call_info);
 
+    pjsua_player_set_pos(player_id, 0);
+
     if (call_info.media_status == PJSUA_CALL_MEDIA_ACTIVE) {
-        pjsua_conf_connect(ring_slot, call_info.conf_slot);
+        pjsua_conf_connect(wav_port, call_info.conf_slot);
         pjsua_conf_connect(call_info.conf_slot, 0);
     }
 }
@@ -206,6 +215,16 @@ int main(int argc, char *argv[])
     pj_assert(status == PJ_SUCCESS);
     status = pjmedia_tonegen_play(m_port, 1, &tones, PJMEDIA_TONEGEN_LOOP);
     pj_assert(status == PJ_SUCCESS);
+
+    /* WAV player */
+    pj_cstr(&wav_file, WAV_FILE);
+    status = pjsua_player_create(&wav_file, PJMEDIA_FILE_NO_LOOP, &player_id);
+    if (status != PJ_SUCCESS) {
+        pjsua_perror(THIS_APP, "Unable to create WAV player", status);
+    }
+
+    wav_port = pjsua_player_get_conf_port(player_id);
+
 
     while(1) {
         char option[10];

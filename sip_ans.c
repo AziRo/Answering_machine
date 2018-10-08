@@ -7,9 +7,14 @@
 #define SIP_USER "111"
 #define PORT 5083
 
-
 #define MAX_COUNT 1
 #define DELAY 2
+
+
+pj_pool_t *pool;
+pjmedia_port *m_port;
+pjsua_conf_port_id ring_slot;
+pjmedia_tone_desc tones;
 
 
 static void timer_callback(pj_timer_heap_t *ht, pj_timer_entry *e)
@@ -68,7 +73,7 @@ void timer(int sec, int msec)
     }
     pj_time_val next_delay;
     do {
-        pj_thread_sleep(sec/2);
+        pj_thread_sleep(500);
         pj_timer_heap_poll(timer, &next_delay);
     } while (pj_timer_heap_count(timer) > 0);
 
@@ -93,7 +98,7 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
     pjsua_call_answer(call_id, 180, NULL, NULL);
 
     pj_thread_sleep(2500);
-    //timer(2, 0);
+    //timer(2, 500);
 
     /* 200 OK */
     pjsua_call_answer(call_id, 200, NULL, NULL);
@@ -105,30 +110,6 @@ static void on_call_media_state(pjsua_call_id call_id)
     pjsua_call_info call_info;
 
     pjsua_call_get_info(call_id, &call_info);
-
-    pj_status_t status;
-    pj_pool_t *pool;
-    pjmedia_port *m_port;
-    pjsua_conf_port_id ring_slot;
-    pjmedia_tone_desc tones;
-    pool = pjsua_pool_create(THIS_APP, 1000, 1000);
-    status = pjmedia_tonegen_create(pool, 8000, 1, 160, 16,
-                                    PJMEDIA_TONEGEN_LOOP, &m_port);
-    if (status != PJ_SUCCESS) {
-        pjsua_perror(THIS_APP, "Unable to create tonegen",status);
-    }
-
-    tones.freq1 = 425;
-    //tones.freq2 = 350;
-    tones.on_msec = 1000;
-    tones.off_msec = 4000;
-    tones.volume = PJMEDIA_TONEGEN_VOLUME;
-    tones.flags = 0;
-
-    status = pjsua_conf_add_port(pool, m_port, &ring_slot);
-    pj_assert(status == PJ_SUCCESS);
-    status = pjmedia_tonegen_play(m_port, 1, &tones, PJMEDIA_TONEGEN_LOOP);
-    pj_assert(status == PJ_SUCCESS);
 
     if (call_info.media_status == PJSUA_CALL_MEDIA_ACTIVE) {
         pjsua_conf_connect(ring_slot, call_info.conf_slot);
@@ -206,6 +187,25 @@ int main(int argc, char *argv[])
         PJ_LOG(3,(THIS_APP,"Error: unable to schedule timer heap: %s", errmsg));
         return -1;
     }
+
+    /* Tonegen */
+    pool = pjsua_pool_create(THIS_APP, 1000, 1000);
+    status = pjmedia_tonegen_create(pool, 8000, 1, 160, 16,
+                                    PJMEDIA_TONEGEN_LOOP, &m_port);
+    if (status != PJ_SUCCESS) {
+        pjsua_perror(THIS_APP, "Unable to create tonegen",status);
+    }
+
+    tones.freq1 = 425;
+    tones.on_msec = 1000;
+    tones.off_msec = 4000;
+    tones.volume = PJMEDIA_TONEGEN_VOLUME;
+    tones.flags = 0;
+
+    status = pjsua_conf_add_port(pool, m_port, &ring_slot);
+    pj_assert(status == PJ_SUCCESS);
+    status = pjmedia_tonegen_play(m_port, 1, &tones, PJMEDIA_TONEGEN_LOOP);
+    pj_assert(status == PJ_SUCCESS);
 
     while(1) {
         char option[10];

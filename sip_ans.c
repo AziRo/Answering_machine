@@ -1,5 +1,4 @@
 #include <pjsua-lib/pjsua.h>
-//#include <pjlib.h>
 
 #define THIS_APP "SIP_ANS"
 
@@ -7,40 +6,125 @@
 #define SIP_USER "111"
 #define PORT 5083
 
+#define NUMBER1 "1111"
+#define NUMBER2 "2222"
+#define NUMBER3 "3333"
+#define NUMBER4 "4444"
+
+
+#define MAX_CLIENT 20
+
 #define MAX_COUNT 1
 #define DELAY 2
 
-#define WAV_FILE "./trentemoller-miss_you.wav"
-
-pj_pool_t *pool;
-pjmedia_port *m_port;
-pjsua_conf_port_id ring_slot;
-pjmedia_tone_desc tones;
-
-pjsua_player_id player_id;
-pjsua_conf_port_id wav_port;
-pj_str_t wav_file;
+#define LOOP_WAV_FILE "./trentemoller-miss_you.wav"
+#define WAV_FILE "./Sound.wav"
 
 
+typedef struct tonegen_i {
+    pj_pool_t *pool;
+    pjmedia_port *m_port;
+    pjsua_conf_port_id ring_slot;
+    pjmedia_tone_desc tones;
+} tonegen_i;
+
+typedef struct player_i {
+    pj_str_t wav_file;
+    pjsua_player_id player_id;
+    pjsua_conf_port_id wav_slot;
+    pjmedia_port *m_port;
+} player_i;
+
+typedef struct calls_info {
+    pjsua_call_id call_id;
+    pjsua_call_info call_info;
+    player_i player;
+    pj_str_t to;
+    unsigned int ind;
+    int lock;
+} calls_info;
+
+
+calls_info c_info[MAX_CLIENT];
+
+pj_str_t c_num1, c_num2, c_num3, c_num4;
+
+tonegen_i tonegen[2];
+player_i loop_player;
+
+
+pj_status_t player_callback(pjmedia_port *m_port, void *user_data)
+{
+    calls_info c_i = *((calls_info*)user_data);
+    c_info[c_i.ind].lock = 0;
+    return pjsua_call_hangup(c_i.call_id, 406, NULL, NULL);
+}
+
+
+int find_unlock() {
+    for (int i = 0; i < MAX_CLIENT; ++i) {
+        if(c_info[i].lock == 0) return i;
+    }
+    return -1;
+}
 
 
 static void timer_callback(pj_timer_heap_t *ht, pj_timer_entry *e)
 {
-    PJ_UNUSED_ARG(ht);
-    PJ_UNUSED_ARG(e);
-
     PJ_LOG(4,(THIS_APP, "----------Timer callback started!---------"));
+    PJ_UNUSED_ARG(ht);
+    pj_status_t status;
+
+    int ind = e->id;
+
+    /* 200 OK */
+    pjsua_call_answer(c_info[ind].call_id, 200, NULL, NULL);
+
+    pjsua_call_info call_info;
+    pjsua_call_get_info(c_info[ind].call_id, &call_info);
+
+    if (call_info.media_status == PJSUA_CALL_MEDIA_ACTIVE) {
+
+        if(!pj_strcmp(&c_info[ind].to, &c_num1)) {
+            pjsua_conf_connect(loop_player.wav_slot, call_info.conf_slot);
+        }
+        else if(!pj_strcmp(&c_info[ind].to, &c_num2)) {
+            pjsua_conf_connect(tonegen[0].ring_slot, call_info.conf_slot);
+        }
+        else if(!pj_strcmp(&c_info[ind].to, &c_num3)) {
+            pjsua_conf_connect(tonegen[1].ring_slot, call_info.conf_slot);
+        }
+        else {
+            pj_cstr(&c_info[ind].player.wav_file, WAV_FILE);
+            status = pjsua_player_create(&c_info[ind].player.wav_file,
+                                         PJMEDIA_FILE_NO_LOOP,
+                                         &c_info[ind].player.player_id);
+
+            if (status != PJ_SUCCESS) {
+                pjsua_perror(THIS_APP, "Unable to create WAV player", status);
+            }
+
+            c_info[ind].player.wav_slot = pjsua_player_get_conf_port(
+                                                  c_info[ind].player.player_id);
+
+            pjsua_player_get_port(c_info[ind].player.player_id,
+                                  &c_info[ind].player.m_port);
+
+            pjmedia_wav_player_set_eof_cb(c_info[ind].player.m_port,
+                                          (void*)&c_info[ind], player_callback);
+
+            pjsua_conf_connect(c_info[ind].player.wav_slot,call_info.conf_slot);
+        }
+
+    }
 }
 
 
-void timer(int sec, int msec)
+void timer(int sec, int msec, int ind)
 {
     pj_status_t status;
-
     pj_size_t size = pj_timer_heap_mem_size(MAX_COUNT);
-
     pj_pool_t* pool = pjsua_pool_create(NULL, size, 1024);
-
     if (!pool) {
         PJ_LOG(3,(THIS_APP, "Error: unable to create pool of %u bytes",
                   size));
@@ -49,42 +133,25 @@ void timer(int sec, int msec)
 
     pj_timer_entry *entry;
     entry = (pj_timer_entry*)pj_pool_calloc(pool, MAX_COUNT, sizeof(*entry));
-
     if (!entry) {
         PJ_LOG(3,(THIS_APP, "pj_pool_calloc failed!"));
         return;
     }
 
-    pj_timer_entry_init(entry, 144, NULL, &timer_callback);
-
-    pj_timer_heap_t* timer;
-    status = pj_timer_heap_create(pool, MAX_COUNT, &timer);
-
-    if(status != PJ_SUCCESS) {
-        char errmsg[PJ_ERR_MSG_SIZE];
-        pj_strerror(status, errmsg, sizeof(errmsg));
-        PJ_LOG(3,(THIS_APP, "Error: unable to create timer heap: %s", errmsg));
-        return;
-    }
+    pj_timer_entry_init(entry, ind, NULL, &timer_callback);
 
     pj_time_val delay;
     delay.sec = sec;
     delay.msec = msec;
 
-    status = pj_timer_heap_schedule(timer, entry, &delay);
+    status = pjsua_schedule_timer(entry, &delay);
     if (status != 0) {
         char errmsg[PJ_ERR_MSG_SIZE];
         pj_strerror(status, errmsg, sizeof(errmsg));
         PJ_LOG(3,(THIS_APP, "Error: unable to schedule timer: %s", errmsg));
         return;
     }
-    pj_time_val next_delay;
-    do {
-        pj_thread_sleep(500);
-        pj_timer_heap_poll(timer, &next_delay);
-    } while (pj_timer_heap_count(timer) > 0);
 
-    pj_pool_release(pool);
 }
 
 
@@ -92,38 +159,36 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
                              pjsip_rx_data *rdata)
 {
     pjsua_call_info call_info;
-
-    PJ_UNUSED_ARG(acc_id);
-    PJ_UNUSED_ARG(rdata);
+    unsigned int client_id = find_unlock();
 
     pjsua_call_get_info(call_id, &call_info);
 
+    pj_pool_t *pool;
+    pool = pjsua_pool_create(NULL, 512, 0);
+    c_info[client_id].to.ptr = (char*) pj_pool_alloc(pool, 256);
+
+    pj_str_t str = call_info.local_info;
+    pj_strcpy(&c_info[client_id].to, &str);
+
+    PJ_LOG(3, (THIS_APP, "Incoming call to: %.*s",
+             (int)c_info[client_id].to.slen, c_info[client_id].to.ptr));
     PJ_LOG(3,(THIS_APP, "Incoming call from %.*s",
              (int)call_info.remote_info.slen, call_info.remote_info.ptr));
 
     /* 180 Ringing */
     pjsua_call_answer(call_id, 180, NULL, NULL);
 
-    pj_thread_sleep(2500);
-    //timer(2, 500);
+    c_info[client_id].call_id = call_id;
+    c_info[client_id].call_info = call_info;
+    c_info[client_id].lock = 1;
 
-    /* 200 OK */
-    pjsua_call_answer(call_id, 200, NULL, NULL);
+    timer(2, 500, client_id);
 }
 
 
 static void on_call_media_state(pjsua_call_id call_id)
 {
-    pjsua_call_info call_info;
 
-    pjsua_call_get_info(call_id, &call_info);
-
-    pjsua_player_set_pos(player_id, 0);
-
-    if (call_info.media_status == PJSUA_CALL_MEDIA_ACTIVE) {
-        pjsua_conf_connect(wav_port, call_info.conf_slot);
-        pjsua_conf_connect(call_info.conf_slot, 0);
-    }
 }
 
 
@@ -139,6 +204,11 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    c_num1 = pj_str("<sip:" NUMBER1 "@" SIP_DOMAIN ">");
+    c_num2 = pj_str("<sip:" NUMBER2 "@" SIP_DOMAIN ">");
+    c_num3 = pj_str("<sip:" NUMBER3 "@" SIP_DOMAIN ">");
+    c_num4 = pj_str("<sip:" NUMBER4 "@" SIP_DOMAIN ">");
+
     {
         pjsua_config cfg;
         pjsua_logging_config log_cfg;
@@ -146,6 +216,9 @@ int main(int argc, char *argv[])
         pjsua_config_default(&cfg);
         cfg.cb.on_incoming_call = &on_incoming_call;
         cfg.cb.on_call_media_state = &on_call_media_state;
+        cfg.cb.on_call_state = NULL;
+        cfg.max_calls = MAX_CLIENT;
+
 
         pjsua_logging_config_default(&log_cfg);
         log_cfg.console_level = 4;
@@ -177,7 +250,6 @@ int main(int argc, char *argv[])
 
     {
         pjsua_acc_config cfg;
-
         pjsua_acc_config_default(&cfg);
         cfg.id = pj_str("sip:" SIP_USER);
         cfg.reg_uri = pj_str("sip:" SIP_USER "@" SIP_DOMAIN);
@@ -197,35 +269,59 @@ int main(int argc, char *argv[])
         return -1;
     }
 
-    /* Tonegen */
-    pool = pjsua_pool_create(THIS_APP, 1000, 1000);
-    status = pjmedia_tonegen_create(pool, 8000, 1, 160, 16,
-                                    PJMEDIA_TONEGEN_LOOP, &m_port);
+    /* Tonegen  0 */
+    tonegen[0].pool = pjsua_pool_create(THIS_APP, 1000, 1000);
+    status = pjmedia_tonegen_create(tonegen[0].pool, 8000, 1, 160, 16,
+                                    PJMEDIA_TONEGEN_LOOP, &tonegen[0].m_port);
     if (status != PJ_SUCCESS) {
         pjsua_perror(THIS_APP, "Unable to create tonegen",status);
     }
 
-    tones.freq1 = 425;
-    tones.on_msec = 1000;
-    tones.off_msec = 4000;
-    tones.volume = PJMEDIA_TONEGEN_VOLUME;
-    tones.flags = 0;
+    tonegen[0].tones.freq1 = 425;
+    tonegen[0].tones.on_msec = 1000;
+    tonegen[0].tones.off_msec = 4000;
+    tonegen[0].tones.volume = PJMEDIA_TONEGEN_VOLUME;
+    tonegen[0].tones.flags = 0;
 
-    status = pjsua_conf_add_port(pool, m_port, &ring_slot);
+    status = pjsua_conf_add_port(tonegen[0].pool, tonegen[0].m_port,
+                                 &tonegen[0].ring_slot);
     pj_assert(status == PJ_SUCCESS);
-    status = pjmedia_tonegen_play(m_port, 1, &tones, PJMEDIA_TONEGEN_LOOP);
+    status = pjmedia_tonegen_play(tonegen[0].m_port, 1, &tonegen[0].tones,
+                                  PJMEDIA_TONEGEN_LOOP);
+    pj_assert(status == PJ_SUCCESS);
+
+    /* Tonegen  1 */
+    tonegen[1].pool = pjsua_pool_create(THIS_APP, 1000, 1000);
+    status = pjmedia_tonegen_create(tonegen[1].pool, 8000, 1, 160, 16,
+                                    PJMEDIA_TONEGEN_LOOP, &tonegen[1].m_port);
+    if (status != PJ_SUCCESS) {
+        pjsua_perror(THIS_APP, "Unable to create tonegen",status);
+    }
+
+    tonegen[1].tones.freq1 = 425;
+    tonegen[1].tones.on_msec = 4000;
+    tonegen[1].tones.off_msec = 0;
+    tonegen[1].tones.volume = PJMEDIA_TONEGEN_VOLUME;
+    tonegen[1].tones.flags = 0;
+
+    status = pjsua_conf_add_port(tonegen[1].pool, tonegen[1].m_port,
+                                 &tonegen[1].ring_slot);
+    pj_assert(status == PJ_SUCCESS);
+    status = pjmedia_tonegen_play(tonegen[1].m_port, 1, &tonegen[1].tones,
+                                  PJMEDIA_TONEGEN_LOOP);
     pj_assert(status == PJ_SUCCESS);
 
     /* WAV player */
-    pj_cstr(&wav_file, WAV_FILE);
-    status = pjsua_player_create(&wav_file, PJMEDIA_FILE_NO_LOOP, &player_id);
+    pj_cstr(&loop_player.wav_file, LOOP_WAV_FILE);
+    status=pjsua_player_create(&loop_player.wav_file,
+                               !PJMEDIA_FILE_NO_LOOP,
+                               &loop_player.player_id);
     if (status != PJ_SUCCESS) {
         pjsua_perror(THIS_APP, "Unable to create WAV player", status);
     }
 
-    wav_port = pjsua_player_get_conf_port(player_id);
-
-
+    loop_player.wav_slot = pjsua_player_get_conf_port(loop_player.player_id);
+    pjsua_player_get_port(loop_player.player_id, &loop_player.m_port);
     while(1) {
         char option[10];
 

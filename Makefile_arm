@@ -1,0 +1,20 @@
+PJBASE=~/pjproject-2.8
+
+include $(PJBASE)/build.mak
+
+CC      = $(APP_CC)
+LDFLAGS = $(APP_LDFLAGS)
+LDLIBS  = $(APP_LDLIBS)
+CFLAGS  = $(APP_CFLAGS)
+CPPFLAGS= ${CFLAGS}
+
+all: sip_ans_arm sip_call_arm
+
+sip_ans_arm: sip_ans.c
+	$(CC) -o $@ $< $(CPPFLAGS) $(LDFLAGS) $(LDLIBS)
+
+sip_call_arm: sip_call.c
+	$(CC) -o $@ $< $(CPPFLAGS) $(LDFLAGS) $(LDLIBS)
+
+clean:
+	rm -f sip_ans_arm.o sip_ans_arm sip_call_arm.o sip_call_arm

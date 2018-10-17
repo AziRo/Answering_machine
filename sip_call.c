@@ -2,7 +2,7 @@
 
 #define THIS_APP "SIP_CALL"
 
-#define SIP_DOMAIN "127.0.1.1"
+#define SIP_DOMAIN "192.168.23.5"
 #define SIP_USER "222"
 
 
@@ -13,8 +13,8 @@ static void on_call_media_state(pjsua_call_id call_id)
     pjsua_call_get_info(call_id, &call_info);
 
     if (call_info.media_status == PJSUA_CALL_MEDIA_ACTIVE) {
-        pjsua_conf_connect(call_info.conf_slot, 0);
-        pjsua_conf_connect(0, call_info.conf_slot);
+        //pjsua_conf_connect(call_info.conf_slot, 0);
+        //pjsua_conf_connect(0, call_info.conf_slot);
     }
 }
 
@@ -74,7 +74,7 @@ int main(int argc, char *argv[])
     if (status != PJ_SUCCESS) {
         pjsua_perror(THIS_APP, "Error starting pjsua", status);
     }
-
+    pjsua_set_null_snd_dev();
     {
         pjsua_acc_config cfg;
 

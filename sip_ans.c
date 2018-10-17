@@ -2,7 +2,7 @@
 
 #define THIS_APP "SIP_ANS"
 
-#define SIP_DOMAIN "192.168.0.106"
+#define SIP_DOMAIN "192.168.23.5"
 #define SIP_USER "111"
 #define PORT 5083
 
@@ -61,9 +61,24 @@ pj_status_t player_callback(pjmedia_port *m_port, void *user_data)
 }
 
 
+void update_info(){
+    for(int i = 0; i < MAX_CLIENT; ++i) {
+        if (c_info[i].lock) {
+            if(!pjsua_call_is_active(c_info[i].call_id)) {
+                if(c_info[i].player.m_port != NULL) {
+                    pjsua_player_destroy(c_info[i].player.player_id);
+                    c_info[i].player.m_port = NULL;
+                }
+                c_info[i].lock = 0;
+            }
+        }
+    }
+}
+
 int find_unlock() {
     for (int i = 0; i < MAX_CLIENT; ++i) {
-        if(c_info[i].lock == 0) return i;
+        update_info();
+        if(!c_info[i].lock) return i;
     }
     return -1;
 }
@@ -159,10 +174,14 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
                              pjsip_rx_data *rdata)
 {
     pjsua_call_info call_info;
-    unsigned int client_id = find_unlock();
 
     pjsua_call_get_info(call_id, &call_info);
-
+    int client_id = find_unlock();
+    if(client_id == -1) {
+      /* 503 Service Unavailable */
+      pjsua_call_answer(call_id, 503, NULL, NULL);
+      return;
+    };
     pj_pool_t *pool;
     pool = pjsua_pool_create(NULL, 512, 0);
     c_info[client_id].to.ptr = (char*) pj_pool_alloc(pool, 256);
@@ -242,11 +261,12 @@ int main(int argc, char *argv[])
             return -1;
         }
     }
-
     status = pjsua_start();
     if (status != PJ_SUCCESS) {
         pjsua_perror(THIS_APP, "Error starting pjsua", status);
     }
+
+    pjsua_set_null_snd_dev();
 
     {
         pjsua_acc_config cfg;
